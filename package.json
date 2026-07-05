@@ -1,0 +1,37 @@
+{
+  "name": "pegasus-memory-mcp",
+  "version": "0.1.0",
+  "description": "Pegasus Memory MCP local-first operational memory server.",
+  "private": true,
+  "type": "module",
+  "productName": "Pegasus Memory MCP",
+  "bin": {
+    "pegasus-memory-mcp": "./dist/bin/pegasus-memory-mcp.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/bin/pegasus-memory-mcp.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:mcp": "vitest run tests/mcp",
+    "test:cli": "vitest run tests/cli"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "better-sqlite3": "^12.2.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}

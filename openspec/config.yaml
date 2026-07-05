@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  Project: pegasus-memory-mcp
+  State: planning-only repo; no implementation stack detected yet
+  Architecture: local-first MCP memory server with SQLite + FTS5 and project/change/session primitives
+  Testing: no runner, test config, or coverage tooling detected yet
+  Style: spec-driven, PRD-first, English technical artifacts
+
+strict_tdd: false
+
+testing:
+  strict_tdd: false
+  runner: none
+  test_command: ""
+  coverage_command: ""
+  notes: "No test framework detected in the current repository state."
+
+rules:
+  proposal:
+    - Include rollback notes when proposing risky persistence changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHOULD, MAY)
+  design:
+    - Document data model, storage, and recovery flow decisions
+  tasks:
+    - Group by phase and keep tasks small enough for one session
+  apply:
+    - Follow existing repository conventions
+    - TDD is disabled until a runnable test stack exists
+  verify:
+    - Record the exact commands used for verification
+  archive:
+    - Preserve the change directory as an audit trail
