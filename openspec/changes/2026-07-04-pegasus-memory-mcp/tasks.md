@@ -33,6 +33,7 @@ Chain strategy: pending
 
 ## Phase 2: Core Domain and Recovery Logic
 
+- [ ] 2.0 Add and commit the npm lockfile (`package-lock.json`) so installs are reproducible before adding core behavior.
 - [ ] 2.1 Create `src/core/entities/` for projects, changes, sessions, memory records, artifacts, handoffs, task progress, events, and lifecycle metadata.
 - [ ] 2.2 Create `src/core/ports/` with `MemoryRepository`, `SearchIndex`, `Clock`, and `IdGenerator`; forbid SDK/SQLite coupling in core.
 - [ ] 2.3 Implement `src/core/freshness/` defaults: decisions 180d, observations 90d, handoffs 30d, task progress 14d, artifact explicit-state staleness.
