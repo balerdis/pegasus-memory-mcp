@@ -44,6 +44,35 @@ export interface SearchIndex {
   upsert(entry: SearchEntry): Promise<void>;
 }
 
+export interface MemorySearchInput {
+  projectId: string;
+  query: string;
+  changeId?: string;
+  sourceType?: SearchEntry["sourceType"];
+  scope?: string;
+  limit?: number;
+  now?: Date;
+}
+
+export interface MemorySearchResult {
+  sourceType: SearchEntry["sourceType"];
+  sourceId: string;
+  projectId: string;
+  changeId?: string;
+  scope?: string;
+  title?: string;
+  content: string;
+  updatedAt: Date;
+  stale: boolean;
+  needsReview: boolean;
+  confirmBeforeRelying: boolean;
+  freshnessReason: string;
+}
+
+export interface MemorySearchPort {
+  searchMemory(input: MemorySearchInput): Promise<MemorySearchResult[]>;
+}
+
 export interface Clock {
   now(): Date;
 }

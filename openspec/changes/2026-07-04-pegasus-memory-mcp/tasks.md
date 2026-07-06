@@ -59,7 +59,7 @@ Chain strategy: stacked-to-main
 
 ## Phase 5: Verification and Documentation
 
-- [ ] 5.0 Add a neutral read/search port so MCP adapter code does not import SQLite-specific search input/result types.
-- [ ] 5.1 Update README or package docs with install/run, bin name, default DB path, and manifest optionality.
-- [ ] 5.2 Run `npm test`, `npm run typecheck`, `npm run build`, and CLI smoke once scripts exist.
-- [ ] 5.3 Run `openspec validate 2026-07-04-pegasus-memory-mcp --strict` and record the result before apply/verify handoff.
+- [x] 5.0 Add a neutral read/search port so MCP adapter code does not import SQLite-specific search input/result types.
+- [x] 5.1 Update README or package docs with install/run, bin name, default DB path, and manifest optionality.
+- [x] 5.2 Run `npm test`, `npm run typecheck`, `npm run build`, and CLI smoke once scripts exist.
+- [x] 5.3 Run `openspec validate 2026-07-04-pegasus-memory-mcp --strict` and record the result before apply/verify handoff.

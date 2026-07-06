@@ -3,14 +3,9 @@ import { z } from "zod";
 import type { CoreEvent, TaskProgressStatus } from "../../core/entities/index.js";
 import { getActiveContext, recoverContext } from "../../core/use-cases/recovery.js";
 import type { createMemoryWriter } from "../../core/use-cases/write-memory.js";
-import type { Clock, MemoryRepository, SearchIndex } from "../../core/ports/index.js";
-import type { SQLiteMemorySearchInput, SQLiteMemorySearchResult } from "../sqlite/index.js";
+import type { Clock, MemoryRepository, MemorySearchPort, SearchIndex } from "../../core/ports/index.js";
 
 type MemoryWriter = ReturnType<typeof createMemoryWriter>;
-
-export interface MemorySearcher {
-  searchMemory(input: SQLiteMemorySearchInput): Promise<SQLiteMemorySearchResult[]>;
-}
 
 export interface RecentEventReader {
   listRecentEvents(projectId: string, input?: { changeId?: string; limit?: number }): Promise<CoreEvent[]>;
@@ -21,7 +16,7 @@ export interface McpAdapterRuntime {
   searchIndex: SearchIndex;
   writer: MemoryWriter;
   clock: Clock;
-  searchable?: MemorySearcher;
+  searchable?: MemorySearchPort;
   eventReader?: RecentEventReader;
 }
 

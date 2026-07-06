@@ -13,37 +13,15 @@ import type {
   TaskProgress
 } from "../../core/entities/index.js";
 import { evaluateFreshness } from "../../core/freshness/index.js";
-import type { ContextBundle, MemoryRepository, SearchEntry, SearchIndex, TransactionalMemoryRepository } from "../../core/ports/index.js";
+import type { ContextBundle, MemoryRepository, MemorySearchInput, MemorySearchPort, MemorySearchResult, SearchEntry, SearchIndex, TransactionalMemoryRepository } from "../../core/ports/index.js";
 
 export interface SQLiteMemoryStoreOptions {
   databasePath?: string;
   migrationsDir?: string;
 }
 
-export interface SQLiteMemorySearchInput {
-  projectId: string;
-  query: string;
-  changeId?: string;
-  sourceType?: SearchEntry["sourceType"];
-  scope?: string;
-  limit?: number;
-  now?: Date;
-}
-
-export interface SQLiteMemorySearchResult {
-  sourceType: SearchEntry["sourceType"];
-  sourceId: string;
-  projectId: string;
-  changeId?: string;
-  scope?: string;
-  title?: string;
-  content: string;
-  updatedAt: Date;
-  stale: boolean;
-  needsReview: boolean;
-  confirmBeforeRelying: boolean;
-  freshnessReason: string;
-}
+export type SQLiteMemorySearchInput = MemorySearchInput;
+export type SQLiteMemorySearchResult = MemorySearchResult;
 
 type Row = Record<string, unknown>;
 
@@ -82,7 +60,7 @@ export function createSQLiteMemoryStore(options: SQLiteMemoryStoreOptions = {}):
   return new SQLiteMemoryStore(db);
 }
 
-export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, TransactionalMemoryRepository {
+export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, MemorySearchPort, TransactionalMemoryRepository {
   private transactionDepth = 0;
 
   constructor(private readonly db: Database.Database) {}
@@ -203,14 +181,14 @@ export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, Transac
     return rows.map(toEvent);
   }
 
-  async searchMemory(input: SQLiteMemorySearchInput): Promise<SQLiteMemorySearchResult[]> {
+  async searchMemory(input: MemorySearchInput): Promise<MemorySearchResult[]> {
     const now = input.now ?? new Date();
     const sourceTypes = input.sourceType ? [input.sourceType] : ["memory_record", "handoff", "artifact", "task_progress"] as const;
     const results = sourceTypes.flatMap((sourceType) => this.searchSource(sourceType, input, now));
     return results.sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime() || left.sourceId.localeCompare(right.sourceId)).slice(0, input.limit ?? 20);
   }
 
-  private searchSource(sourceType: SearchEntry["sourceType"], input: SQLiteMemorySearchInput, now: Date): SQLiteMemorySearchResult[] {
+  private searchSource(sourceType: SearchEntry["sourceType"], input: MemorySearchInput, now: Date): MemorySearchResult[] {
     const query = escapeFtsQuery(input.query);
     const params: Record<string, unknown> = { query, projectId: input.projectId, changeId: input.changeId, scope: input.scope, sourceType };
     const changeFilter = input.changeId ? "AND source.change_id = @changeId" : "";
@@ -286,7 +264,7 @@ function toEvent(row: Row): CoreEvent {
   return { id: row.id as string, projectId: row.project_id as string, changeId: row.change_id as string | undefined, sessionId: row.session_id as string | undefined, type: row.type as string, subjectType: row.subject_type as CoreEvent["subjectType"], subjectId: row.subject_id as string, payload: JSON.parse(row.payload_json as string) as Record<string, unknown>, createdAt: fromIso(row.created_at) };
 }
 
-function toSearchResult(sourceType: SearchEntry["sourceType"], row: Row, now: Date): SQLiteMemorySearchResult {
+function toSearchResult(sourceType: SearchEntry["sourceType"], row: Row, now: Date): MemorySearchResult {
   const lifecycle = toLifecycle(row);
   const freshnessType = row.freshness_type as Parameters<typeof evaluateFreshness>[0];
   const freshness = evaluateFreshness(freshnessType, lifecycle, now);

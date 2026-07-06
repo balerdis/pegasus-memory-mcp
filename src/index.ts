@@ -9,4 +9,4 @@ export { getActiveContext, recoverContext } from "./core/use-cases/recovery.js";
 export { createSQLiteMemoryStore, defaultDatabasePath, openSQLiteDatabase, runMigrations } from "./adapters/sqlite/index.js";
 export type { SQLiteMemorySearchInput, SQLiteMemorySearchResult } from "./adapters/sqlite/index.js";
 export { createMcpToolHandlers, createPegasusMcpServer, toolSchemas } from "./adapters/mcp/index.js";
-export type { McpAdapterRuntime, MemorySearcher, RecentEventReader } from "./adapters/mcp/index.js";
+export type { McpAdapterRuntime, RecentEventReader } from "./adapters/mcp/index.js";

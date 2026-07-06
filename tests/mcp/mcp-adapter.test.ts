@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { createMcpToolHandlers, toolSchemas } from "../../src/adapters/mcp/index.js";
 import { createMemoryWriter, type ArtifactRecord, type Change, type CoreEvent, type Handoff, type MemoryRecord, type Project, type SearchIndex, type TaskProgress } from "../../src/index.js";
 
@@ -87,6 +88,13 @@ describe("MCP adapter contracts", () => {
       "recover_context",
       "search_memory"
     ]);
+  });
+
+  it("depends on neutral read/search ports instead of SQLite search types", () => {
+    const adapterSource = readFileSync(new URL("../../src/adapters/mcp/index.ts", import.meta.url), "utf8");
+
+    expect(adapterSource).not.toContain("../sqlite");
+    expect(adapterSource).toContain("MemorySearchPort");
   });
 
   it("validates write tool inputs and returns freshness plus event metadata", async () => {
