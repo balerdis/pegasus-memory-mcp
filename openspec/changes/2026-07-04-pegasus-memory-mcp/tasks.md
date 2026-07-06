@@ -8,12 +8,12 @@
 | 400-line budget risk | High |
 | Chained PRs recommended | Yes |
 | Suggested split | PR 1 foundation → PR 2 core → PR 3 SQLite → PR 4 MCP/CLI |
-| Delivery strategy | ask-always |
-| Chain strategy | pending |
+| Delivery strategy | chained PRs selected |
+| Chain strategy | stacked-to-main |
 
-Decision needed before apply: Yes
+Decision needed before apply: No
 Chained PRs recommended: Yes
-Chain strategy: pending
+Chain strategy: stacked-to-main
 400-line budget risk: High
 
 ### Suggested Work Units
@@ -33,13 +33,13 @@ Chain strategy: pending
 
 ## Phase 2: Core Domain and Recovery Logic
 
-- [ ] 2.0 Add and commit the npm lockfile (`package-lock.json`) so installs are reproducible before adding core behavior.
-- [ ] 2.1 Create `src/core/entities/` for projects, changes, sessions, memory records, artifacts, handoffs, task progress, events, and lifecycle metadata.
-- [ ] 2.2 Create `src/core/ports/` with `MemoryRepository`, `SearchIndex`, `Clock`, and `IdGenerator`; forbid SDK/SQLite coupling in core.
-- [ ] 2.3 Implement `src/core/freshness/` defaults: decisions 180d, observations 90d, handoffs 30d, task progress 14d, artifact explicit-state staleness.
-- [ ] 2.4 Implement core write use cases for observations, decisions, handoffs, artifacts, and task progress, including event append contracts.
-- [ ] 2.5 Implement active-context and recovery ranking use cases with active-change preference, deterministic score gap, ambiguity candidates, and consumer-controlled confirmation.
-- [ ] 2.6 Test freshness signals, event-not-authority behavior, ranking, ambiguity, and write contract behavior from both specs.
+- [x] 2.0 Add and commit the npm lockfile (`package-lock.json`) so installs are reproducible before adding core behavior.
+- [x] 2.1 Create `src/core/entities/` for projects, changes, sessions, memory records, artifacts, handoffs, task progress, events, and lifecycle metadata.
+- [x] 2.2 Create `src/core/ports/` with `MemoryRepository`, `SearchIndex`, `Clock`, and `IdGenerator`; forbid SDK/SQLite coupling in core.
+- [x] 2.3 Implement `src/core/freshness/` defaults: decisions 180d, observations 90d, handoffs 30d, task progress 14d, artifact explicit-state staleness.
+- [x] 2.4 Implement core write use cases for observations, decisions, handoffs, artifacts, and task progress, including event append contracts.
+- [x] 2.5 Implement active-context and recovery ranking use cases with active-change preference, deterministic score gap, ambiguity candidates, and consumer-controlled confirmation.
+- [x] 2.6 Test freshness signals, event-not-authority behavior, ranking, ambiguity, and write contract behavior from both specs.
 
 ## Phase 3: SQLite Persistence and Search
 
