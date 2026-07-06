@@ -43,10 +43,11 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: SQLite Persistence and Search
 
-- [ ] 3.1 Add `migrations/001_initial.sql` with `schema_migrations`, source tables, lifecycle columns, `event`, and `memory_fts` using SQLite FTS5.
-- [ ] 3.2 Implement `src/adapters/sqlite/` repositories, migration runner, transactions, default DB creation, and FTS updates in the same transaction as source writes.
-- [ ] 3.3 Implement project/change filtering, source-table joins, recency decoration, and freshness decoration for `search_memory`.
-- [ ] 3.4 Test migrations, transaction rollback, FTS filtering/join correctness, missing manifest tolerance, and stale manifest non-authority with temp SQLite DBs.
+- [x] 3.0 Adjust build output so `npm run build` emits only runtime/library artifacts and does not compile tests into `dist/`.
+- [x] 3.1 Add `migrations/001_initial.sql` with `schema_migrations`, source tables, lifecycle columns, `event`, and `memory_fts` using SQLite FTS5.
+- [x] 3.2 Implement `src/adapters/sqlite/` repositories, migration runner, transactions, default DB creation, and FTS updates in the same transaction as source writes.
+- [x] 3.3 Implement project/change filtering, source-table joins, recency decoration, and freshness decoration for `search_memory`.
+- [x] 3.4 Test migrations, transaction rollback, FTS filtering/join correctness, missing manifest tolerance, and stale manifest non-authority with temp SQLite DBs.
 
 ## Phase 4: MCP Adapter, CLI, and Packaging
 

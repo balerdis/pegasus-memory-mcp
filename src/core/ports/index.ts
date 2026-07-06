@@ -28,6 +28,10 @@ export interface MemoryRepository {
   getContextBundle(projectId: string, changeId: string): Promise<ContextBundle>;
 }
 
+export interface TransactionalMemoryRepository extends MemoryRepository {
+  transaction<T>(operation: () => Promise<T>): Promise<T>;
+}
+
 export interface SearchEntry {
   sourceType: "memory_record" | "handoff" | "artifact" | "task_progress";
   sourceId: string;

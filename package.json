@@ -12,7 +12,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/bin/pegasus-memory-mcp.js",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/bin/pegasus-memory-mcp.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",

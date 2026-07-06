@@ -9,7 +9,7 @@ import type {
   WithFreshness
 } from "../entities/index.js";
 import { evaluateFreshness, withLifecycle } from "../freshness/index.js";
-import type { Clock, IdGenerator, MemoryRepository, SearchIndex } from "../ports/index.js";
+import type { Clock, IdGenerator, MemoryRepository, SearchIndex, TransactionalMemoryRepository } from "../ports/index.js";
 
 interface CommonInput {
   projectId: string;
@@ -47,6 +47,14 @@ export interface WriteResult<T> {
 }
 
 export function createMemoryWriter(repository: MemoryRepository, searchIndex: SearchIndex, clock: Clock, ids: IdGenerator) {
+  const commit = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (isTransactional(repository)) {
+      return repository.transaction(operation);
+    }
+
+    return operation();
+  };
+
   const appendEvent = async (input: CommonInput, type: string, subjectType: CoreEvent["subjectType"], subjectId: string): Promise<CoreEvent> => {
     const event: CoreEvent = {
       id: ids.generate("event"),
@@ -76,10 +84,12 @@ export function createMemoryWriter(repository: MemoryRepository, searchIndex: Se
       scope: input.scope ?? "change",
       lifecycle: withLifecycle(kind, clock.now())
     };
-    await repository.saveMemoryRecord(record);
-    await searchIndex.upsert({ sourceType: "memory_record", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: `${record.title}\n${record.content}\n${record.rationale ?? ""}` });
-    const event = await appendEvent(input, `${kind}.recorded`, "memory_record", record.id);
-    return { record: { ...record, freshness: evaluateFreshness(kind, record.lifecycle, clock.now()) }, event };
+    return commit(async () => {
+      await repository.saveMemoryRecord(record);
+      await searchIndex.upsert({ sourceType: "memory_record", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: `${record.title}\n${record.content}\n${record.rationale ?? ""}` });
+      const event = await appendEvent(input, `${kind}.recorded`, "memory_record", record.id);
+      return { record: { ...record, freshness: evaluateFreshness(kind, record.lifecycle, clock.now()) }, event };
+    });
   };
 
   return {
@@ -87,24 +97,34 @@ export function createMemoryWriter(repository: MemoryRepository, searchIndex: Se
     recordDecision: (input: DecisionInput) => writeMemory("decision", input),
     async recordHandoff(input: CommonInput & { content: string }): Promise<WriteResult<Handoff>> {
       const record: Handoff = { id: ids.generate("handoff"), projectId: input.projectId, changeId: input.changeId, sessionId: input.sessionId, content: input.content, lifecycle: withLifecycle("handoff", clock.now()) };
-      await repository.saveHandoff(record);
-      await searchIndex.upsert({ sourceType: "handoff", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: record.content });
-      const event = await appendEvent(input, "handoff.recorded", "handoff", record.id);
-      return { record: { ...record, freshness: evaluateFreshness("handoff", record.lifecycle, clock.now()) }, event };
+      return commit(async () => {
+        await repository.saveHandoff(record);
+        await searchIndex.upsert({ sourceType: "handoff", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: record.content });
+        const event = await appendEvent(input, "handoff.recorded", "handoff", record.id);
+        return { record: { ...record, freshness: evaluateFreshness("handoff", record.lifecycle, clock.now()) }, event };
+      });
     },
     async recordArtifact(input: ArtifactInput): Promise<WriteResult<ArtifactRecord>> {
       const record: ArtifactRecord = { id: ids.generate("artifact"), projectId: input.projectId, changeId: input.changeId, kind: input.kind, path: input.path, title: input.title, summary: input.summary, lifecycle: withLifecycle("artifact", clock.now()) };
-      await repository.saveArtifact(record);
-      await searchIndex.upsert({ sourceType: "artifact", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: `${record.title}\n${record.summary ?? ""}\n${record.path ?? ""}` });
-      const event = await appendEvent(input, "artifact.recorded", "artifact", record.id);
-      return { record: { ...record, freshness: evaluateFreshness("artifact", record.lifecycle, clock.now()) }, event };
+      return commit(async () => {
+        await repository.saveArtifact(record);
+        await searchIndex.upsert({ sourceType: "artifact", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: `${record.title}\n${record.summary ?? ""}\n${record.path ?? ""}` });
+        const event = await appendEvent(input, "artifact.recorded", "artifact", record.id);
+        return { record: { ...record, freshness: evaluateFreshness("artifact", record.lifecycle, clock.now()) }, event };
+      });
     },
     async recordTaskProgress(input: TaskInput): Promise<WriteResult<TaskProgress>> {
       const record: TaskProgress = { id: ids.generate("task-progress"), projectId: input.projectId, changeId: input.changeId, taskKey: input.taskKey, status: input.status, notes: input.notes, blockers: input.blockers, lifecycle: withLifecycle("task_progress", clock.now()) };
-      await repository.saveTaskProgress(record);
-      await searchIndex.upsert({ sourceType: "task_progress", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: `${record.taskKey}\n${record.status}\n${record.notes ?? ""}\n${record.blockers?.join("\n") ?? ""}` });
-      const event = await appendEvent(input, "task_progress.recorded", "task_progress", record.id);
-      return { record: { ...record, freshness: evaluateFreshness("task_progress", record.lifecycle, clock.now()) }, event };
+      return commit(async () => {
+        await repository.saveTaskProgress(record);
+        await searchIndex.upsert({ sourceType: "task_progress", sourceId: record.id, projectId: record.projectId, changeId: record.changeId, text: `${record.taskKey}\n${record.status}\n${record.notes ?? ""}\n${record.blockers?.join("\n") ?? ""}` });
+        const event = await appendEvent(input, "task_progress.recorded", "task_progress", record.id);
+        return { record: { ...record, freshness: evaluateFreshness("task_progress", record.lifecycle, clock.now()) }, event };
+      });
     }
   };
+}
+
+function isTransactional(repository: MemoryRepository): repository is TransactionalMemoryRepository {
+  return "transaction" in repository && typeof repository.transaction === "function";
 }
