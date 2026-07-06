@@ -195,6 +195,14 @@ export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, Transac
     };
   }
 
+  async listRecentEvents(projectId: string, input: { changeId?: string; limit?: number } = {}): Promise<CoreEvent[]> {
+    const changeFilter = input.changeId ? "AND change_id = @changeId" : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM event WHERE project_id = @projectId ${changeFilter} ORDER BY created_at DESC, id ASC LIMIT @limit`)
+      .all({ projectId, changeId: input.changeId, limit: input.limit ?? 20 }) as Row[];
+    return rows.map(toEvent);
+  }
+
   async searchMemory(input: SQLiteMemorySearchInput): Promise<SQLiteMemorySearchResult[]> {
     const now = input.now ?? new Date();
     const sourceTypes = input.sourceType ? [input.sourceType] : ["memory_record", "handoff", "artifact", "task_progress"] as const;

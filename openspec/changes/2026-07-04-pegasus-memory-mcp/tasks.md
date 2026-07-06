@@ -51,14 +51,15 @@ Chain strategy: stacked-to-main
 
 ## Phase 4: MCP Adapter, CLI, and Packaging
 
-- [ ] 4.1 Add `src/adapters/mcp/` Zod schemas and handlers for `record_observation`, `record_decision`, `record_handoff`, `record_artifact`, `record_task_progress`, `get_active_context`, `recover_context`, `search_memory`, `list_recent_changes`, and `list_recent_events`.
-- [ ] 4.2 Map MCP errors/responses without moving business rules into adapters; expose stale, needs-review, confirmation-needed, and ambiguous metadata.
-- [ ] 4.3 Add `src/bin/pegasus-memory-mcp` startup over stdio with default DB path `~/.local/share/pegasus-memory-mcp/memory.db` and env/config override.
-- [ ] 4.4 Test MCP validation/response contracts and CLI smoke startup against the configured bin.
-- [ ] 4.5 Keep `"private": true` during implementation; remove it only in an explicit packaging/release task when the package is ready to publish.
+- [x] 4.1 Add `src/adapters/mcp/` Zod schemas and handlers for `record_observation`, `record_decision`, `record_handoff`, `record_artifact`, `record_task_progress`, `get_active_context`, `recover_context`, `search_memory`, `list_recent_changes`, and `list_recent_events`.
+- [x] 4.2 Map MCP errors/responses without moving business rules into adapters; expose stale, needs-review, confirmation-needed, and ambiguous metadata.
+- [x] 4.3 Add `src/bin/pegasus-memory-mcp` startup over stdio with default DB path `~/.local/share/pegasus-memory-mcp/memory.db` and env/config override.
+- [x] 4.4 Test MCP validation/response contracts and CLI smoke startup against the configured bin.
+- [x] 4.5 Keep `"private": true` during implementation; remove it only in an explicit packaging/release task when the package is ready to publish.
 
 ## Phase 5: Verification and Documentation
 
+- [ ] 5.0 Add a neutral read/search port so MCP adapter code does not import SQLite-specific search input/result types.
 - [ ] 5.1 Update README or package docs with install/run, bin name, default DB path, and manifest optionality.
 - [ ] 5.2 Run `npm test`, `npm run typecheck`, `npm run build`, and CLI smoke once scripts exist.
 - [ ] 5.3 Run `openspec validate 2026-07-04-pegasus-memory-mcp --strict` and record the result before apply/verify handoff.
