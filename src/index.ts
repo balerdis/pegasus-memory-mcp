@@ -1,4 +1,5 @@
 export const packageName = "pegasus-memory-mcp";
+export const packageVersion = "0.1.0";
 export const productName = "Pegasus Memory MCP";
 
 export type * from "./core/entities/index.js";

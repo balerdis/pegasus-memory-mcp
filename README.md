@@ -34,6 +34,45 @@ node dist/bin/pegasus-memory-mcp.js --db /path/to/memory.db
 
 `--db` wins over `PEGASUS_MEMORY_DB_PATH`.
 
+## VS Code stdio setup
+
+Build the project first, then point VS Code at the built CLI with an absolute path:
+
+```json
+{
+  "servers": {
+    "pegasus-memory": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/pegasus-memory-mcp/dist/bin/pegasus-memory-mcp.js"],
+      "env": {
+        "PEGASUS_MEMORY_DB_PATH": "/absolute/path/to/memory.db"
+      }
+    }
+  }
+}
+```
+
+You can also pass the database path as a CLI argument. `--db` takes precedence over `PEGASUS_MEMORY_DB_PATH`:
+
+```json
+{
+  "servers": {
+    "pegasus-memory": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/absolute/path/to/pegasus-memory-mcp/dist/bin/pegasus-memory-mcp.js",
+        "--db",
+        "/absolute/path/to/memory.db"
+      ]
+    }
+  }
+}
+```
+
+Consumers should first invoke `health`. If the process or tool invocation fails, treat MCP as unavailable out-of-band. If `health` succeeds but `recover_context` returns `not_found`, the server is available and simply has no recoverable context. If `recover_context` returns `ambiguous`, ask the user to choose from the concise candidates. Read failures surface as `read_error`; write failures surface as `persistence_error`.
+
 ## Manifest behavior
 
 `manifest.json` is optional. The server uses its internal SQLite operational state when a manifest is missing or stale; manifests are compatibility/bootstrap artifacts, not the source of truth.

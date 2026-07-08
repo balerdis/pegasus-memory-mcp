@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { randomUUID } from "node:crypto";
-import { packageName, productName, createMemoryWriter, createSQLiteMemoryStore, defaultDatabasePath } from "../index.js";
+import { packageName, packageVersion, productName, createMemoryWriter, createSQLiteMemoryStore, defaultDatabasePath } from "../index.js";
 import { createPegasusMcpServer } from "../adapters/mcp/index.js";
 
 export interface RuntimeConfig {
@@ -30,6 +30,7 @@ export async function runCli(args: string[] = process.argv.slice(2), env: NodeJS
   }
 
   const config = resolveRuntimeConfig(args, env);
+  const defaultDbPath = defaultDatabasePath(env.HOME);
   const store = createSQLiteMemoryStore({ databasePath: config.databasePath });
   const clock = { now: () => new Date() };
   const ids = { generate: (prefix: string) => `${prefix}-${randomUUID()}` };
@@ -40,7 +41,20 @@ export async function runCli(args: string[] = process.argv.slice(2), env: NodeJS
     return 0;
   }
 
-  const server = createPegasusMcpServer({ repository: store, searchIndex: store, searchable: store, eventReader: store, writer, clock });
+  const server = createPegasusMcpServer({
+    repository: store,
+    searchIndex: store,
+    searchable: store,
+    eventReader: store,
+    writer,
+    clock,
+    metadata: {
+      serverName: packageName,
+      version: packageVersion,
+      defaultDbPath,
+      ...(config.databasePath !== defaultDbPath ? { configuredDbPath: config.databasePath } : {})
+    }
+  });
   await server.connect(new StdioServerTransport());
   return 0;
 }

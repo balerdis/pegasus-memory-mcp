@@ -18,6 +18,14 @@ export interface McpAdapterRuntime {
   clock: Clock;
   searchable?: MemorySearchPort;
   eventReader?: RecentEventReader;
+  metadata?: McpAdapterMetadata;
+}
+
+export interface McpAdapterMetadata {
+  serverName?: string;
+  version?: string;
+  defaultDbPath?: string;
+  configuredDbPath?: string;
 }
 
 const commonWriteSchema = z.object({
@@ -27,6 +35,7 @@ const commonWriteSchema = z.object({
 });
 
 export const toolSchemas = {
+  health: z.object({}),
   record_observation: commonWriteSchema.extend({
     title: z.string().min(1),
     content: z.string().min(1),
@@ -73,23 +82,38 @@ export class McpAdapterError extends Error {
   }
 }
 
+type ErrorStatus = "read_error" | "persistence_error";
+
 export function createMcpToolHandlers(runtime: McpAdapterRuntime) {
+  const metadata = runtime.metadata ?? {};
   return {
-    record_observation: async (input: unknown) => okWrite(await runtime.writer.recordObservation(parse("record_observation", input))),
-    record_decision: async (input: unknown) => okWrite(await runtime.writer.recordDecision(parse("record_decision", input))),
-    record_handoff: async (input: unknown) => okWrite(await runtime.writer.recordHandoff(parse("record_handoff", input))),
-    record_artifact: async (input: unknown) => okWrite(await runtime.writer.recordArtifact(parse("record_artifact", input))),
-    record_task_progress: async (input: unknown) => okWrite(await runtime.writer.recordTaskProgress(parse("record_task_progress", input) as z.infer<typeof toolSchemas.record_task_progress> & { status: TaskProgressStatus })),
-    get_active_context: async (input: unknown) => normalizeDates(await getActiveContext(runtime.repository, runtime.clock, parse("get_active_context", input))),
-    recover_context: async (input: unknown) => normalizeDates(await recoverContext(runtime.repository, runtime.clock, parse("recover_context", input))),
+    health: async (input: unknown) => {
+      parse("health", input);
+      return {
+        ok: true,
+        status: "operational",
+        tool: "health",
+        server: { name: metadata.serverName ?? "pegasus-memory-mcp", version: metadata.version ?? "0.1.0" },
+        capabilities: { recovery: true, search: Boolean(runtime.searchable), write: true },
+        defaultDbPath: metadata.defaultDbPath ?? "",
+        ...(metadata.configuredDbPath ? { configuredDbPath: metadata.configuredDbPath } : {})
+      };
+    },
+    record_observation: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordObservation(parse("record_observation", input)))),
+    record_decision: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordDecision(parse("record_decision", input)))),
+    record_handoff: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordHandoff(parse("record_handoff", input)))),
+    record_artifact: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordArtifact(parse("record_artifact", input)))),
+    record_task_progress: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordTaskProgress(parse("record_task_progress", input) as z.infer<typeof toolSchemas.record_task_progress> & { status: TaskProgressStatus }))),
+    get_active_context: async (input: unknown) => safeRead(async () => normalizeDates(await getActiveContext(runtime.repository, runtime.clock, parse("get_active_context", input)))),
+    recover_context: async (input: unknown) => safeRead(async () => normalizeDates(await recoverContext(runtime.repository, runtime.clock, parse("recover_context", input)))),
     search_memory: async (input: unknown) => {
       if (!runtime.searchable) {
         throw new McpAdapterError("unsupported_operation", "search_memory requires a searchable runtime");
       }
       const parsed = parse("search_memory", input);
-      return { ok: true, results: normalizeDates(await runtime.searchable.searchMemory({ ...parsed, now: runtime.clock.now() })) };
+      return safeRead(async () => ({ ok: true, results: normalizeDates(await runtime.searchable!.searchMemory({ ...parsed, now: runtime.clock.now() })) }));
     },
-    list_recent_changes: async (input: unknown) => {
+    list_recent_changes: async (input: unknown) => safeRead(async () => {
       const parsed = parse("list_recent_changes", input);
       const project = await runtime.repository.getProjectByKey(parsed.projectKey);
       if (!project) {
@@ -97,8 +121,8 @@ export function createMcpToolHandlers(runtime: McpAdapterRuntime) {
       }
       const changes = (await runtime.repository.listChanges(project.id)).slice(0, parsed.limit ?? 20);
       return { ok: true, changes: normalizeDates(changes) };
-    },
-    list_recent_events: async (input: unknown) => {
+    }),
+    list_recent_events: async (input: unknown) => safeRead(async () => {
       const parsed = parse("list_recent_events", input);
       const project = await runtime.repository.getProjectByKey(parsed.projectKey);
       if (!project) {
@@ -108,12 +132,12 @@ export function createMcpToolHandlers(runtime: McpAdapterRuntime) {
         ? await runtime.eventReader.listRecentEvents(project.id, { changeId: parsed.changeId, limit: parsed.limit })
         : [];
       return { ok: true, events: normalizeDates(events) };
-    }
+    })
   };
 }
 
 export function createPegasusMcpServer(runtime: McpAdapterRuntime): McpServer {
-  const server = new McpServer({ name: "pegasus-memory-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: runtime.metadata?.serverName ?? "pegasus-memory-mcp", version: runtime.metadata?.version ?? "0.1.0" });
   const handlers = createMcpToolHandlers(runtime);
 
   for (const name of Object.keys(toolSchemas) as McpToolName[]) {
@@ -148,6 +172,40 @@ async function executeHandler(handler: (input: unknown) => Promise<unknown>, inp
 
 function okWrite(result: unknown) {
   return { ok: true, ...normalizeDates(result) as Record<string, unknown> };
+}
+
+async function safeRead(action: () => Promise<unknown>): Promise<unknown> {
+  return safeBoundary("read_error", action);
+}
+
+async function safeWrite(action: () => Promise<unknown>): Promise<unknown> {
+  return safeBoundary("persistence_error", action);
+}
+
+async function safeBoundary(status: ErrorStatus, action: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof McpAdapterError || isProgrammerError(error)) {
+      throw error;
+    }
+    return {
+      ok: false,
+      status,
+      error: toErrorPayload(status, error)
+    };
+  }
+}
+
+function isProgrammerError(error: unknown): boolean {
+  return error instanceof TypeError || error instanceof ReferenceError || error instanceof SyntaxError || error instanceof RangeError;
+}
+
+function toErrorPayload(status: ErrorStatus, error: unknown) {
+  return {
+    code: status,
+    message: error instanceof Error && error.message ? error.message : "Storage operation failed"
+  };
 }
 
 function toToolResult(output: unknown) {
