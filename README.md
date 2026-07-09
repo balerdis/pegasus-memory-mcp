@@ -73,6 +73,18 @@ You can also pass the database path as a CLI argument. `--db` takes precedence o
 
 Consumers should first invoke `health`. If the process or tool invocation fails, treat MCP as unavailable out-of-band. If `health` succeeds but `recover_context` returns `not_found`, the server is available and simply has no recoverable context. If `recover_context` returns `ambiguous`, ask the user to choose from the concise candidates. Read failures surface as `read_error`; write failures surface as `persistence_error`.
 
+## Fresh workspace bootstrap flow
+
+Use the official write preflight sequence for new or empty workspaces:
+
+```text
+health -> recover_context -> ensure_project -> ensure_change -> record_*
+```
+
+`health.capabilities.parent_bootstrap` indicates that `ensure_project` and `ensure_change` are available. `ensure_project` requires `project_id` and accepts optional `key`, `name`, `workspace_root`, and `description`. Repeated calls return the existing project without overwriting stored metadata.
+
+`ensure_change` requires `project_id` and `change_id`, accepts optional `key`, `title`, `status`, `kind`/`type`, and `description`, and does not implicitly create a project. If the parent project is missing, it returns `status: "precondition_failed"` with `basis: "project_not_found"` instead of raw database foreign-key details.
+
 ## Manifest behavior
 
 `manifest.json` is optional. The server uses its internal SQLite operational state when a manifest is missing or stale; manifests are compatibility/bootstrap artifacts, not the source of truth.

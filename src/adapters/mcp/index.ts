@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { CoreEvent, TaskProgressStatus } from "../../core/entities/index.js";
+import { createBootstrapEnsurer } from "../../core/use-cases/ensure-bootstrap.js";
 import { getActiveContext, recoverContext } from "../../core/use-cases/recovery.js";
 import type { createMemoryWriter } from "../../core/use-cases/write-memory.js";
 import type { Clock, MemoryRepository, MemorySearchPort, SearchIndex } from "../../core/ports/index.js";
@@ -36,6 +37,23 @@ const commonWriteSchema = z.object({
 
 export const toolSchemas = {
   health: z.object({}),
+  ensure_project: z.object({
+    project_id: z.string().min(1),
+    key: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    workspace_root: z.string().min(1).optional(),
+    description: z.string().min(1).optional()
+  }),
+  ensure_change: z.object({
+    project_id: z.string().min(1),
+    change_id: z.string().min(1),
+    key: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    status: z.string().min(1).optional(),
+    kind: z.string().min(1).optional(),
+    type: z.string().min(1).optional(),
+    description: z.string().min(1).optional()
+  }),
   record_observation: commonWriteSchema.extend({
     title: z.string().min(1),
     content: z.string().min(1),
@@ -86,6 +104,7 @@ type ErrorStatus = "read_error" | "persistence_error";
 
 export function createMcpToolHandlers(runtime: McpAdapterRuntime) {
   const metadata = runtime.metadata ?? {};
+  const bootstrap = createBootstrapEnsurer(runtime.repository, runtime.clock);
   return {
     health: async (input: unknown) => {
       parse("health", input);
@@ -94,11 +113,13 @@ export function createMcpToolHandlers(runtime: McpAdapterRuntime) {
         status: "operational",
         tool: "health",
         server: { name: metadata.serverName ?? "pegasus-memory-mcp", version: metadata.version ?? "0.1.0" },
-        capabilities: { recovery: true, search: Boolean(runtime.searchable), write: true },
+        capabilities: { recovery: true, search: Boolean(runtime.searchable), write: true, parent_bootstrap: true },
         defaultDbPath: metadata.defaultDbPath ?? "",
         ...(metadata.configuredDbPath ? { configuredDbPath: metadata.configuredDbPath } : {})
       };
     },
+    ensure_project: async (input: unknown) => safeWrite(async () => normalizeDates(await bootstrap.ensureProject(toEnsureProjectInput(parse("ensure_project", input))))),
+    ensure_change: async (input: unknown) => safeWrite(async () => normalizeDates(await bootstrap.ensureChange(toEnsureChangeInput(parse("ensure_change", input))))),
     record_observation: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordObservation(parse("record_observation", input)))),
     record_decision: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordDecision(parse("record_decision", input)))),
     record_handoff: async (input: unknown) => safeWrite(async () => okWrite(await runtime.writer.recordHandoff(parse("record_handoff", input)))),
@@ -149,6 +170,29 @@ export function createPegasusMcpServer(runtime: McpAdapterRuntime): McpServer {
   }
 
   return server;
+}
+
+function toEnsureProjectInput(input: z.infer<typeof toolSchemas.ensure_project>) {
+  return {
+    projectId: input.project_id,
+    key: input.key,
+    name: input.name,
+    workspaceRoot: input.workspace_root,
+    description: input.description
+  };
+}
+
+function toEnsureChangeInput(input: z.infer<typeof toolSchemas.ensure_change>) {
+  return {
+    projectId: input.project_id,
+    changeId: input.change_id,
+    key: input.key,
+    title: input.title,
+    status: input.status,
+    kind: input.kind,
+    type: input.type,
+    description: input.description
+  };
 }
 
 function parse<Name extends McpToolName>(name: Name, input: unknown): z.infer<(typeof toolSchemas)[Name]> {

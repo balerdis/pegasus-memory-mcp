@@ -109,6 +109,8 @@ function seedAmbiguousRuntime() {
 describe("MCP adapter contracts", () => {
   it("declares the complete MVP MCP tool surface", () => {
     expect(Object.keys(toolSchemas).sort()).toEqual([
+      "ensure_change",
+      "ensure_project",
       "get_active_context",
       "health",
       "list_recent_changes",
@@ -121,6 +123,13 @@ describe("MCP adapter contracts", () => {
       "recover_context",
       "search_memory"
     ]);
+  });
+
+  it("declares bootstrap tool schemas with stable snake_case identifiers", () => {
+    expect(toolSchemas.ensure_project.safeParse({ project_id: "project-2" }).success).toBe(true);
+    expect(toolSchemas.ensure_project.safeParse({ projectId: "project-2" }).success).toBe(false);
+    expect(toolSchemas.ensure_change.safeParse({ project_id: "project-2", change_id: "change-2" }).success).toBe(true);
+    expect(toolSchemas.ensure_change.safeParse({ project_id: "project-2" }).success).toBe(false);
   });
 
   it("depends on neutral read/search ports instead of SQLite search types", () => {
@@ -176,7 +185,7 @@ describe("MCP adapter contracts", () => {
       status: "operational",
       tool: "health",
       server: { name: "pegasus-memory-mcp", version: "0.1.0" },
-      capabilities: { recovery: true, search: true, write: true },
+      capabilities: { recovery: true, search: true, write: true, parent_bootstrap: true },
       defaultDbPath: "/tmp/default.db",
       configuredDbPath: "/tmp/configured.db"
     });
@@ -184,6 +193,67 @@ describe("MCP adapter contracts", () => {
     expect(store.readCount).toBe(0);
     expect(store.writeCount).toBe(0);
     expect(store.records).toEqual([]);
+  });
+
+  it("ensures projects and changes idempotently without overwriting stored metadata", async () => {
+    const { handlers, store } = seedRuntime();
+
+    const existingProject = await handlers.ensure_project({
+      project_id: "project-1",
+      key: "pegasus",
+      name: "Overwritten name",
+      workspace_root: "/other/root",
+      description: "Overwritten description"
+    });
+    const newProject = await handlers.ensure_project({
+      project_id: "project-2",
+      key: "pegasus-memory-mcp",
+      name: "Pegasus Memory MCP",
+      workspace_root: "/repo/pegasus-memory-mcp",
+      description: "Operational memory server"
+    });
+    const existingChange = await handlers.ensure_change({
+      project_id: "project-1",
+      change_id: "change-1",
+      key: "mcp",
+      title: "Overwritten title",
+      status: "done",
+      kind: "feature",
+      description: "Overwritten description"
+    });
+    const newChange = await handlers.ensure_change({
+      project_id: "project-2",
+      change_id: "change-2",
+      title: "Bootstrap tools",
+      status: "apply",
+      type: "feature",
+      description: "Expose parent bootstrap tools"
+    });
+
+    expect(existingProject).toMatchObject({ ok: true, created: false, project: { id: "project-1", key: "pegasus" } });
+    expect(existingProject.project).not.toMatchObject({ name: "Overwritten name", rootPath: "/other/root", description: "Overwritten description" });
+    expect(newProject).toMatchObject({ ok: true, created: true, project: { id: "project-2", key: "pegasus-memory-mcp", name: "Pegasus Memory MCP", rootPath: "/repo/pegasus-memory-mcp", description: "Operational memory server" } });
+    expect(existingChange).toMatchObject({ ok: true, created: false, change: { id: "change-1", title: "MCP adapter" } });
+    expect(existingChange.change).not.toMatchObject({ title: "Overwritten title", status: "done", kind: "feature", description: "Overwritten description" });
+    expect(newChange).toMatchObject({ ok: true, created: true, change: { id: "change-2", projectId: "project-2", key: "change-2", title: "Bootstrap tools", status: "apply", kind: "feature", description: "Expose parent bootstrap tools" } });
+    expect(store.projects).toHaveLength(2);
+    expect(store.changes).toHaveLength(2);
+  });
+
+  it("returns a stable missing-project precondition for ensure_change without leaking raw FK details", async () => {
+    const { handlers } = seedRuntime();
+
+    const result = await handlers.ensure_change({ project_id: "missing-project", change_id: "change-2", title: "Bootstrap tools" });
+
+    expect(result).toEqual({
+      ok: false,
+      status: "precondition_failed",
+      basis: "project_not_found",
+      message: "Project 'missing-project' must be ensured before ensuring a change.",
+      confirmationRequired: false
+    });
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("foreign key");
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("sqlite");
   });
 
   it("keeps no context and ambiguous recovery as normal availability states", async () => {
