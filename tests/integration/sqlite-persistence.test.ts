@@ -9,7 +9,7 @@ import {
   runMigrations,
   type SQLiteMemorySearchResult
 } from "../../src/adapters/sqlite/index.js";
-import { createMemoryWriter, type ArtifactRecord, type Handoff, type MemoryRecord, type Project, type TaskProgress } from "../../src/index.js";
+import { createBootstrapEnsurer, createMemoryWriter, type ArtifactRecord, type Change, type Handoff, type MemoryRecord, type Project, type TaskProgress } from "../../src/index.js";
 
 const now = new Date("2026-07-05T00:00:00.000Z");
 
@@ -49,7 +49,7 @@ function resultTitles(results: SQLiteMemorySearchResult[]) {
 }
 
 describe("SQLite persistence and search", () => {
-  it("runs the initial migration with source tables, events, and FTS5", async () => {
+  it("runs migrations with source tables, bootstrap metadata, events, and FTS5", async () => {
     const { dbPath } = await tempDb();
     const db = openSQLiteDatabase(dbPath);
     try {
@@ -57,7 +57,9 @@ describe("SQLite persistence and search", () => {
 
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
       expect(tables.map((table) => table.name)).toEqual(expect.arrayContaining(["schema_migrations", "project", "change", "session", "memory_record", "artifact", "handoff", "task_progress", "event", "memory_fts"]));
-      expect(db.prepare("SELECT version FROM schema_migrations").pluck().all()).toEqual([1]);
+      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2]);
+      expect(db.prepare("PRAGMA table_info(project)").all().map((column) => (column as { name: string }).name)).toContain("description");
+      expect(db.prepare('PRAGMA table_info("change")').all().map((column) => (column as { name: string }).name)).toEqual(expect.arrayContaining(["description", "kind"]));
     } finally {
       db.close();
     }
@@ -105,6 +107,67 @@ describe("SQLite persistence and search", () => {
 
     const scopedResults = await store.searchMemory({ projectId: "project-1", changeId: "change-1", query: "sqlite", scope: "change" });
     expect(resultTitles(scopedResults)).toEqual(["Use SQLite"]);
+  });
+
+  it("round trips nullable bootstrap metadata through SQLite", async () => {
+    const { dbPath } = await tempDb();
+    const store = createSQLiteMemoryStore({ databasePath: dbPath });
+    const project: Project = {
+      id: "project-meta",
+      key: "pegasus-meta",
+      name: "Pegasus Meta",
+      description: "Project bootstrap metadata",
+      rootPath: "/work/pegasus",
+      lifecycle: { createdAt: now, updatedAt: now }
+    };
+    const change: Change = {
+      id: "change-meta",
+      projectId: project.id,
+      key: "bootstrap",
+      title: "Bootstrap",
+      description: "Change bootstrap metadata",
+      kind: "feature",
+      status: "planned",
+      lifecycle: { createdAt: now, updatedAt: now }
+    };
+
+    await store.saveProject(project);
+    await store.saveChange(change);
+
+    expect(await store.getProjectById(project.id)).toMatchObject({ description: "Project bootstrap metadata", rootPath: "/work/pegasus" });
+    expect(await store.getChangeById(change.id)).toMatchObject({ description: "Change bootstrap metadata", kind: "feature", status: "planned" });
+  });
+
+  it("ensures projects and changes without mutating existing metadata", async () => {
+    const { dbPath } = await tempDb();
+    const store = createSQLiteMemoryStore({ databasePath: dbPath });
+    const ensurer = createBootstrapEnsurer(store, new FixedClock());
+    await store.saveProject({ id: "project-1", key: "pegasus", name: "Stored Name", description: "Stored description", rootPath: "/stored", lifecycle: { createdAt: now, updatedAt: now } });
+    await store.saveChange({ id: "change-1", projectId: "project-1", key: "main", title: "Stored Title", description: "Stored change", kind: "bugfix", status: "active", lifecycle: { createdAt: now, updatedAt: now } });
+
+    const projectResult = await ensurer.ensureProject({ projectId: "project-1", key: "pegasus", name: "Incoming Name", workspaceRoot: "/incoming", description: "Incoming description" });
+    const changeResult = await ensurer.ensureChange({ projectId: "project-1", changeId: "change-1", key: "main", title: "Incoming Title", kind: "feature", description: "Incoming change" });
+
+    expect(projectResult).toMatchObject({ ok: true, created: false, project: { name: "Stored Name", description: "Stored description", rootPath: "/stored" } });
+    expect(changeResult).toMatchObject({ ok: true, created: false, change: { title: "Stored Title", description: "Stored change", kind: "bugfix", status: "active" } });
+    expect(await store.getProjectById("project-1")).toMatchObject({ name: "Stored Name", description: "Stored description", rootPath: "/stored" });
+    expect(await store.getChangeById("change-1")).toMatchObject({ title: "Stored Title", description: "Stored change", kind: "bugfix", status: "active" });
+  });
+
+  it("creates missing bootstrap rows and rejects change ensure when the project is missing", async () => {
+    const { dbPath } = await tempDb();
+    const store = createSQLiteMemoryStore({ databasePath: dbPath });
+    const ensurer = createBootstrapEnsurer(store, new FixedClock());
+
+    const missingProject = await ensurer.ensureChange({ projectId: "missing-project", changeId: "change-missing" });
+    expect(missingProject).toMatchObject({ ok: false, status: "precondition_failed", basis: "project_not_found", confirmationRequired: false });
+    expect(missingProject.message).not.toMatch(/foreign key|constraint/i);
+
+    const projectResult = await ensurer.ensureProject({ projectId: "project-new", name: "New Project", description: "Created by ensure" });
+    const changeResult = await ensurer.ensureChange({ projectId: "project-new", changeId: "change-new", title: "New Change", type: "feature", description: "Created change" });
+
+    expect(projectResult).toMatchObject({ ok: true, created: true, project: { id: "project-new", key: "project-new", name: "New Project", description: "Created by ensure" } });
+    expect(changeResult).toMatchObject({ ok: true, created: true, change: { id: "change-new", projectId: "project-new", key: "change-new", title: "New Change", kind: "feature", description: "Created change" } });
   });
 
   it("works without manifest authority and keeps internal memory authoritative when a manifest is stale", async () => {

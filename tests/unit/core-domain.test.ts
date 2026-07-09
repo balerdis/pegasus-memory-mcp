@@ -51,6 +51,14 @@ class FakeRepo {
     this.records.push(record);
   }
 
+  async saveProject(project: Project) {
+    this.projects.push(project);
+  }
+
+  async saveChange(change: Change) {
+    this.changes.push(change);
+  }
+
   async saveHandoff(handoff: Handoff) {
     this.handoffs.push(handoff);
   }
@@ -71,8 +79,16 @@ class FakeRepo {
     return this.projects.find((project) => project.key === key);
   }
 
+  async getProjectById(id: string) {
+    return this.projects.find((project) => project.id === id);
+  }
+
   async getChangeById(id: string) {
     return this.changes.find((change) => change.id === id);
+  }
+
+  async getChangeByProjectAndKey(projectId: string, key: string) {
+    return this.changes.find((change) => change.projectId === projectId && change.key === key);
   }
 
   async listChanges(projectId: string) {

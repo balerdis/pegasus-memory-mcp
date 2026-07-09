@@ -25,8 +25,10 @@ export type SQLiteMemorySearchResult = MemorySearchResult;
 
 type Row = Record<string, unknown>;
 
-const migrationVersion = 1;
-const migrationName = "001_initial.sql";
+const migrations = [
+  { version: 1, name: "001_initial.sql" },
+  { version: 2, name: "002_bootstrap_metadata.sql" }
+] as const;
 
 export function defaultDatabasePath(home = process.env.HOME ?? process.cwd()): string {
   return join(home, ".local", "share", "pegasus-memory-mcp", "memory.db");
@@ -41,15 +43,17 @@ export function openSQLiteDatabase(databasePath = defaultDatabasePath()): Databa
 
 export function runMigrations(db: Database.Database, migrationsDir = resolve(process.cwd(), "migrations")): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)");
-  const applied = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(migrationVersion);
-  if (applied) {
-    return;
-  }
-
-  const sql = readFileSync(join(migrationsDir, migrationName), "utf8");
   const migrate = db.transaction(() => {
-    db.exec(sql);
-    db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(migrationVersion, migrationName, new Date().toISOString());
+    for (const migration of migrations) {
+      const applied = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(migration.version);
+      if (applied) {
+        continue;
+      }
+
+      const sql = readFileSync(join(migrationsDir, migration.name), "utf8");
+      db.exec(sql);
+      db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(migration.version, migration.name, new Date().toISOString());
+    }
   });
   migrate();
 }
@@ -90,18 +94,38 @@ export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, MemoryS
 
   async saveProject(project: Project): Promise<void> {
     this.db
-      .prepare(`INSERT INTO project (id, key, name, root_path, active_change_id, created_at, updated_at, review_after, lifecycle_state, archived_at)
-        VALUES (@id, @key, @name, @rootPath, @activeChangeId, @createdAt, @updatedAt, @reviewAfter, @lifecycleState, @archivedAt)
-        ON CONFLICT(id) DO UPDATE SET key = excluded.key, name = excluded.name, root_path = excluded.root_path, active_change_id = excluded.active_change_id, updated_at = excluded.updated_at, review_after = excluded.review_after, lifecycle_state = excluded.lifecycle_state, archived_at = excluded.archived_at`)
-      .run(bind({ id: project.id, key: project.key, name: project.name, rootPath: project.rootPath, activeChangeId: project.activeChangeId, ...toLifecycleColumns(project.lifecycle) }));
+      .prepare(`INSERT INTO project (id, key, name, description, root_path, active_change_id, created_at, updated_at, review_after, lifecycle_state, archived_at)
+        VALUES (@id, @key, @name, @description, @rootPath, @activeChangeId, @createdAt, @updatedAt, @reviewAfter, @lifecycleState, @archivedAt)
+        ON CONFLICT(id) DO UPDATE SET key = excluded.key, name = excluded.name, description = excluded.description, root_path = excluded.root_path, active_change_id = excluded.active_change_id, updated_at = excluded.updated_at, review_after = excluded.review_after, lifecycle_state = excluded.lifecycle_state, archived_at = excluded.archived_at`)
+      .run(bind({ id: project.id, key: project.key, name: project.name, description: project.description, rootPath: project.rootPath, activeChangeId: project.activeChangeId, ...toLifecycleColumns(project.lifecycle) }));
   }
 
   async saveChange(change: Change): Promise<void> {
     this.db
-      .prepare(`INSERT INTO "change" (id, project_id, key, title, phase, status, is_active, last_touched_at, task_completion_ratio, created_at, updated_at, review_after, lifecycle_state, archived_at)
-        VALUES (@id, @projectId, @key, @title, @phase, @status, @isActive, @lastTouchedAt, @taskCompletionRatio, @createdAt, @updatedAt, @reviewAfter, @lifecycleState, @archivedAt)
-        ON CONFLICT(id) DO UPDATE SET key = excluded.key, title = excluded.title, phase = excluded.phase, status = excluded.status, is_active = excluded.is_active, last_touched_at = excluded.last_touched_at, task_completion_ratio = excluded.task_completion_ratio, updated_at = excluded.updated_at, review_after = excluded.review_after, lifecycle_state = excluded.lifecycle_state, archived_at = excluded.archived_at`)
-      .run(bind({ id: change.id, projectId: change.projectId, key: change.key, title: change.title, phase: change.phase, status: change.status, isActive: change.isActive ? 1 : 0, lastTouchedAt: toIso(change.lastTouchedAt), taskCompletionRatio: change.taskCompletionRatio, ...toLifecycleColumns(change.lifecycle) }));
+      .prepare(`INSERT INTO "change" (id, project_id, key, title, description, kind, phase, status, is_active, last_touched_at, task_completion_ratio, created_at, updated_at, review_after, lifecycle_state, archived_at)
+        VALUES (@id, @projectId, @key, @title, @description, @kind, @phase, @status, @isActive, @lastTouchedAt, @taskCompletionRatio, @createdAt, @updatedAt, @reviewAfter, @lifecycleState, @archivedAt)
+        ON CONFLICT(id) DO UPDATE SET key = excluded.key, title = excluded.title, description = excluded.description, kind = excluded.kind, phase = excluded.phase, status = excluded.status, is_active = excluded.is_active, last_touched_at = excluded.last_touched_at, task_completion_ratio = excluded.task_completion_ratio, updated_at = excluded.updated_at, review_after = excluded.review_after, lifecycle_state = excluded.lifecycle_state, archived_at = excluded.archived_at`)
+      .run(bind({ id: change.id, projectId: change.projectId, key: change.key, title: change.title, description: change.description, kind: change.kind, phase: change.phase, status: change.status, isActive: change.isActive ? 1 : 0, lastTouchedAt: toIso(change.lastTouchedAt), taskCompletionRatio: change.taskCompletionRatio, ...toLifecycleColumns(change.lifecycle) }));
+  }
+
+  async ensureProject(project: Project): Promise<{ project: Project; created: boolean }> {
+    const existing = await this.getProjectById(project.id) ?? await this.getProjectByKey(project.key);
+    if (existing) {
+      return { project: existing, created: false };
+    }
+
+    await this.saveProject(project);
+    return { project, created: true };
+  }
+
+  async ensureChange(change: Change): Promise<{ change: Change; created: boolean }> {
+    const existing = await this.getChangeById(change.id) ?? await this.getChangeByProjectAndKey(change.projectId, change.key);
+    if (existing) {
+      return { change: existing, created: false };
+    }
+
+    await this.saveChange(change);
+    return { change, created: true };
   }
 
   async saveMemoryRecord(record: MemoryRecord): Promise<void> {
@@ -153,8 +177,18 @@ export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, MemoryS
     return row ? toProject(row) : undefined;
   }
 
+  async getProjectById(id: string): Promise<Project | undefined> {
+    const row = this.db.prepare("SELECT * FROM project WHERE id = ?").get(id) as Row | undefined;
+    return row ? toProject(row) : undefined;
+  }
+
   async getChangeById(id: string): Promise<Change | undefined> {
     const row = this.db.prepare('SELECT * FROM "change" WHERE id = ?').get(id) as Row | undefined;
+    return row ? toChange(row) : undefined;
+  }
+
+  async getChangeByProjectAndKey(projectId: string, key: string): Promise<Change | undefined> {
+    const row = this.db.prepare('SELECT * FROM "change" WHERE project_id = ? AND key = ?').get(projectId, key) as Row | undefined;
     return row ? toChange(row) : undefined;
   }
 
@@ -237,11 +271,11 @@ function toLifecycle(row: Row): LifecycleMetadata {
 }
 
 function toProject(row: Row): Project {
-  return { id: row.id as string, key: row.key as string, name: row.name as string | undefined, rootPath: row.root_path as string | undefined, activeChangeId: row.active_change_id as string | undefined, lifecycle: toLifecycle(row) };
+  return { id: row.id as string, key: row.key as string, name: row.name as string | undefined, description: row.description as string | undefined, rootPath: row.root_path as string | undefined, activeChangeId: row.active_change_id as string | undefined, lifecycle: toLifecycle(row) };
 }
 
 function toChange(row: Row): Change {
-  return { id: row.id as string, projectId: row.project_id as string, key: row.key as string, title: row.title as string, phase: row.phase as string | undefined, status: row.status as string | undefined, isActive: row.is_active === 1, lastTouchedAt: fromOptionalIso(row.last_touched_at), taskCompletionRatio: row.task_completion_ratio as number | undefined, lifecycle: toLifecycle(row) };
+  return { id: row.id as string, projectId: row.project_id as string, key: row.key as string, title: row.title as string, description: row.description as string | undefined, kind: row.kind as string | undefined, phase: row.phase as string | undefined, status: row.status as string | undefined, isActive: row.is_active === 1, lastTouchedAt: fromOptionalIso(row.last_touched_at), taskCompletionRatio: row.task_completion_ratio as number | undefined, lifecycle: toLifecycle(row) };
 }
 
 function toMemoryRecord(row: Row): MemoryRecord {

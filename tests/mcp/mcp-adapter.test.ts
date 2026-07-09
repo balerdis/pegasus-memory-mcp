@@ -35,13 +35,17 @@ class FakeStore implements SearchIndex {
   writeCount = 0;
 
   async saveMemoryRecord(record: MemoryRecord) { this.checkWrite(); this.records.push(record); }
+  async saveProject(project: Project) { this.checkWrite(); this.projects.push(project); }
+  async saveChange(change: Change) { this.checkWrite(); this.changes.push(change); }
   async saveHandoff(handoff: Handoff) { this.checkWrite(); this.handoffs.push(handoff); }
   async saveArtifact(artifact: ArtifactRecord) { this.checkWrite(); this.artifacts.push(artifact); }
   async saveTaskProgress(progress: TaskProgress) { this.checkWrite(); this.tasks.push(progress); }
   async appendEvent(event: CoreEvent) { this.checkWrite(); this.events.push(event); }
   async upsert() { this.checkWrite(); }
   async getProjectByKey(key: string) { this.checkRead(); return this.projects.find((project) => project.key === key); }
+  async getProjectById(id: string) { this.checkRead(); return this.projects.find((project) => project.id === id); }
   async getChangeById(id: string) { this.checkRead(); return this.changes.find((change) => change.id === id); }
+  async getChangeByProjectAndKey(projectId: string, key: string) { this.checkRead(); return this.changes.find((change) => change.projectId === projectId && change.key === key); }
   async listChanges(projectId: string) { this.checkRead(); return this.changes.filter((change) => change.projectId === projectId); }
   async getContextBundle(projectId: string, changeId: string) {
     this.checkRead();

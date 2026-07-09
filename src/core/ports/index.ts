@@ -17,13 +17,17 @@ export interface ContextBundle {
 }
 
 export interface MemoryRepository {
+  saveProject(project: Project): Promise<void>;
+  saveChange(change: Change): Promise<void>;
   saveMemoryRecord(record: MemoryRecord): Promise<void>;
   saveHandoff(handoff: Handoff): Promise<void>;
   saveArtifact(artifact: ArtifactRecord): Promise<void>;
   saveTaskProgress(progress: TaskProgress): Promise<void>;
   appendEvent(event: CoreEvent): Promise<void>;
+  getProjectById(id: string): Promise<Project | undefined>;
   getProjectByKey(key: string): Promise<Project | undefined>;
   getChangeById(id: string): Promise<Change | undefined>;
+  getChangeByProjectAndKey(projectId: string, key: string): Promise<Change | undefined>;
   listChanges(projectId: string): Promise<Change[]>;
   getContextBundle(projectId: string, changeId: string): Promise<ContextBundle>;
 }

@@ -20,6 +20,7 @@ export interface Project {
   id: string;
   key: string;
   name?: string;
+  description?: string;
   rootPath?: string;
   activeChangeId?: string;
   lifecycle: LifecycleMetadata;
@@ -30,6 +31,8 @@ export interface Change {
   projectId: string;
   key: string;
   title: string;
+  description?: string;
+  kind?: string;
   phase?: string;
   status?: string;
   isActive?: boolean;
