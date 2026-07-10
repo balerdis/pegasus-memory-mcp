@@ -89,6 +89,47 @@ health -> recover_context -> ensure_project -> ensure_change -> record_*
 
 `manifest.json` is optional. The server uses its internal SQLite operational state when a manifest is missing or stale; manifests are compatibility/bootstrap artifacts, not the source of truth.
 
+## Maintenance commands
+
+Pegasus Memory MCP is private implementation infrastructure (`"private": true`) and must not be published until a dedicated release task changes that policy. Bootstrap and uninstall flows should use the official maintenance commands instead of deleting internal paths directly.
+
+### Reset one project
+
+```bash
+pegasus-memory-mcp reset --project <project_id> --dry-run
+pegasus-memory-mcp reset --project <project_id> --yes
+```
+
+`reset --project` uses the active configured database (`--db` wins over `PEGASUS_MEMORY_DB_PATH`, otherwise the default database path). It deletes only the selected project row, relies on SQLite foreign-key cascades for project-scoped source tables, and explicitly removes matching `memory_fts` rows. It never deletes database files, sidecars, other projects, repos, workspaces, or OpenSpec artifacts.
+
+### Purge owned default storage
+
+```bash
+pegasus-memory-mcp purge --all --dry-run
+pegasus-memory-mcp purge --all --yes-i-understand-this-deletes-data
+```
+
+`purge --all` deletes only Pegasus-owned default storage resolved from `defaultDatabasePath(HOME)`: `memory.db`, `memory.db-wal`, `memory.db-shm`, and `memory.db-journal`. Custom database paths from `--db` or `PEGASUS_MEMORY_DB_PATH` are reported as skipped and are never deleted.
+
+Destructive execution requires the exact confirmation flag. `--dry-run` prints the plan and does not create database files or parent directories.
+
+### Stable output and exit codes
+
+Maintenance commands emit one JSON record to stdout on success or stderr on errors:
+
+```json
+{
+  "command": "reset",
+  "mode": "dry_run",
+  "targets": ["/home/user/.local/share/pegasus-memory-mcp/memory.db", "project:example", "memory_fts"],
+  "deleted": [],
+  "skipped": [],
+  "status": "planned"
+}
+```
+
+Fields are stable: `command`, `mode`, `targets`, `deleted`, `skipped`, and `status`. Success, dry-run, and no-op results exit `0`; usage, validation, or missing confirmation exits `2`; real execution errors exit `1`.
+
 ## Verification
 
 ```bash

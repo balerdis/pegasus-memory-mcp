@@ -1,9 +1,25 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import packageJson from "../../package.json" with { type: "json" };
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { defaultDatabasePath } from "../../src/adapters/sqlite/index.js";
 import { resolveRuntimeConfig, runCli } from "../../src/bin/pegasus-memory-mcp.js";
+
+async function captureCli(args: string[], env: NodeJS.ProcessEnv) {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const log = vi.spyOn(console, "log").mockImplementation((value: string) => stdout.push(value));
+  const error = vi.spyOn(console, "error").mockImplementation((value: string) => stderr.push(value));
+  try {
+    const code = await runCli(args, env);
+    return { code, stdout, stderr };
+  } finally {
+    log.mockRestore();
+    error.mockRestore();
+  }
+}
 
 describe("CLI runtime", () => {
   it("keeps implementation packaging private until an explicit release task", () => {
@@ -33,5 +49,66 @@ describe("CLI runtime", () => {
     expect(readme).toContain("--db");
     expect(readme).toContain("invoke `health`");
     expect(readme).toContain("invocation fails");
+  });
+
+  it("rejects destructive maintenance commands without exact confirmation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pegasus-memory-cli-"));
+
+    const reset = await captureCli(["reset", "--project", "project-1"], { HOME: dir });
+    expect(reset.code).toBe(2);
+    expect(JSON.parse(reset.stderr[0])).toMatchObject({ command: "reset", status: "error" });
+
+    const purge = await captureCli(["purge", "--all", "--yes"], { HOME: dir });
+    expect(purge.code).toBe(2);
+    expect(JSON.parse(purge.stderr[0])).toMatchObject({ command: "purge", status: "error" });
+  });
+
+  it("dry-runs reset as JSON without creating database files or parent directories", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pegasus-memory-cli-"));
+    const dbPath = join(dir, "missing", "memory.db");
+
+    const result = await captureCli(["reset", "--project", "project-1", "--dry-run", "--db", dbPath], { HOME: dir });
+    const record = JSON.parse(result.stdout[0]);
+
+    expect(result.code).toBe(0);
+    expect(record).toMatchObject({ command: "reset", mode: "dry_run", status: "noop", deleted: [] });
+    expect(record.targets).toContain(dbPath);
+    expect(existsSync(dbPath)).toBe(false);
+    expect(existsSync(dirname(dbPath))).toBe(false);
+  });
+
+  it("executes missing-project reset as a successful no-op", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pegasus-memory-cli-"));
+    const dbPath = join(dir, "memory.db");
+    await runCli(["--smoke-start", "--db", dbPath], { HOME: dir });
+
+    const result = await captureCli(["reset", "--project", "missing", "--yes", "--db", dbPath], { HOME: dir });
+    const record = JSON.parse(result.stdout[0]);
+
+    expect(result.code).toBe(0);
+    expect(record).toMatchObject({ command: "reset", mode: "execute", status: "noop", deleted: [] });
+    expect(record.skipped).toEqual(expect.arrayContaining([{ target: "project:missing", reason: "project_not_found" }]));
+  });
+
+  it("purges only default owned paths and reports custom database paths as skipped", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pegasus-memory-cli-"));
+    const defaultDb = defaultDatabasePath(dir);
+    const customDb = join(dir, "custom", "memory.db");
+    await mkdir(dirname(defaultDb), { recursive: true });
+    await mkdir(dirname(customDb), { recursive: true });
+    await writeFile(defaultDb, "owned");
+    await writeFile(`${defaultDb}-wal`, "owned wal");
+    await writeFile(customDb, "custom");
+
+    const result = await captureCli(["purge", "--all", "--yes-i-understand-this-deletes-data", "--db", customDb], { HOME: dir });
+    const record = JSON.parse(result.stdout[0]);
+
+    expect(result.code).toBe(0);
+    expect(record).toMatchObject({ command: "purge", mode: "execute", status: "deleted" });
+    expect(record.deleted).toEqual(expect.arrayContaining([defaultDb, `${defaultDb}-wal`]));
+    expect(record.skipped).toEqual(expect.arrayContaining([{ target: customDb, reason: "custom_database_path_not_owned" }]));
+    expect(existsSync(defaultDb)).toBe(false);
+    expect(existsSync(`${defaultDb}-wal`)).toBe(false);
+    expect(existsSync(customDb)).toBe(true);
   });
 });

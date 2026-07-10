@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type {
   ArtifactRecord,
@@ -13,7 +13,7 @@ import type {
   TaskProgress
 } from "../../core/entities/index.js";
 import { evaluateFreshness } from "../../core/freshness/index.js";
-import type { ContextBundle, MemoryRepository, MemorySearchInput, MemorySearchPort, MemorySearchResult, SearchEntry, SearchIndex, TransactionalMemoryRepository } from "../../core/ports/index.js";
+import type { ContextBundle, MaintenanceMode, MaintenanceResult, MemoryRepository, MemorySearchInput, MemorySearchPort, MemorySearchResult, ProjectMaintenancePort, ProjectResetInput, SearchEntry, SearchIndex, TransactionalMemoryRepository } from "../../core/ports/index.js";
 
 export interface SQLiteMemoryStoreOptions {
   databasePath?: string;
@@ -32,6 +32,11 @@ const migrations = [
 
 export function defaultDatabasePath(home = process.env.HOME ?? process.cwd()): string {
   return join(home, ".local", "share", "pegasus-memory-mcp", "memory.db");
+}
+
+export function defaultDatabaseTargets(home = process.env.HOME ?? process.cwd()): string[] {
+  const databasePath = defaultDatabasePath(home);
+  return [databasePath, `${databasePath}-wal`, `${databasePath}-shm`, `${databasePath}-journal`];
 }
 
 export function openSQLiteDatabase(databasePath = defaultDatabasePath()): Database.Database {
@@ -64,7 +69,105 @@ export function createSQLiteMemoryStore(options: SQLiteMemoryStoreOptions = {}):
   return new SQLiteMemoryStore(db);
 }
 
-export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, MemorySearchPort, TransactionalMemoryRepository {
+export async function purgeOwnedSQLiteStorage(input: { home?: string; mode: MaintenanceMode; configuredDbPath?: string } = { mode: "execute" }): Promise<MaintenanceResult> {
+  const databasePath = defaultDatabasePath(input.home);
+  const targets = defaultDatabaseTargets(input.home);
+  const skipped = input.configuredDbPath && input.configuredDbPath !== databasePath
+    ? [{ target: input.configuredDbPath, reason: "custom_database_path_not_owned" }]
+    : [];
+
+  if (input.mode === "dry_run") {
+    return { command: "purge", mode: input.mode, targets, deleted: [], skipped, status: targets.some((target) => existsSync(target)) ? "planned" : "noop" };
+  }
+
+  const deleted: string[] = [];
+  for (const target of targets) {
+    if (!existsSync(target)) {
+      skipped.push({ target, reason: "not_found" });
+      continue;
+    }
+    unlinkSync(target);
+    deleted.push(target);
+  }
+
+  const dataDir = dirname(databasePath);
+  try {
+    rmdirSync(dataDir);
+    deleted.push(dataDir);
+  } catch {
+    skipped.push({ target: dataDir, reason: "directory_not_empty_or_missing" });
+  }
+
+  return { command: "purge", mode: input.mode, targets, deleted, skipped, status: deleted.length > 0 ? "deleted" : "noop" };
+}
+
+export async function resetProjectData(input: ProjectResetInput): Promise<MaintenanceResult> {
+  const targets = [input.databasePath, `project:${input.projectId}`, "memory_fts"];
+
+  if (!existsSync(input.databasePath)) {
+    return {
+      command: "reset",
+      mode: input.mode,
+      targets,
+      deleted: [],
+      skipped: [{ target: input.databasePath, reason: "database_not_found" }],
+      status: "noop"
+    };
+  }
+
+  if (input.mode === "dry_run") {
+    const db = new Database(input.databasePath, { readonly: true, fileMustExist: true });
+    try {
+      const exists = db.prepare("SELECT 1 FROM project WHERE id = ?").get(input.projectId);
+      const ftsCount = db.prepare("SELECT count(*) AS count FROM memory_fts WHERE project_id = ?").get(input.projectId) as { count: number };
+      return {
+        command: "reset",
+        mode: input.mode,
+        targets,
+        deleted: [],
+        skipped: exists ? [] : [{ target: `project:${input.projectId}`, reason: "project_not_found" }],
+        status: exists || ftsCount.count > 0 ? "planned" : "noop"
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  const db = openSQLiteDatabase(input.databasePath);
+  try {
+    runMigrations(db);
+    const deleted = db.transaction(() => {
+      const exists = db.prepare("SELECT 1 FROM project WHERE id = ?").get(input.projectId);
+      if (!exists) {
+        return [] as string[];
+      }
+
+      const fts = db.prepare("DELETE FROM memory_fts WHERE project_id = ?").run(input.projectId);
+      const project = db.prepare("DELETE FROM project WHERE id = ?").run(input.projectId);
+      const removed = [`project:${input.projectId}`];
+      if (fts.changes > 0) {
+        removed.push(`memory_fts:${fts.changes}`);
+      }
+      if (project.changes > 0) {
+        removed.push(`project_rows:${project.changes}`);
+      }
+      return removed;
+    })();
+
+    return {
+      command: "reset",
+      mode: input.mode,
+      targets,
+      deleted,
+      skipped: deleted.length > 0 ? [] : [{ target: `project:${input.projectId}`, reason: "project_not_found" }],
+      status: deleted.length > 0 ? "deleted" : "noop"
+    };
+  } finally {
+    db.close();
+  }
+}
+
+export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, MemorySearchPort, TransactionalMemoryRepository, ProjectMaintenancePort {
   private transactionDepth = 0;
 
   constructor(private readonly db: Database.Database) {}
@@ -170,6 +273,10 @@ export class SQLiteMemoryStore implements MemoryRepository, SearchIndex, MemoryS
   async upsert(entry: SearchEntry): Promise<void> {
     this.db.prepare("DELETE FROM memory_fts WHERE source_type = ? AND source_id = ?").run(entry.sourceType, entry.sourceId);
     this.db.prepare("INSERT INTO memory_fts (source_type, source_id, project_id, change_id, text) VALUES (?, ?, ?, ?, ?)").run(entry.sourceType, entry.sourceId, entry.projectId, entry.changeId, entry.text);
+  }
+
+  async resetProjectData(input: ProjectResetInput): Promise<MaintenanceResult> {
+    return resetProjectData(input);
   }
 
   async getProjectByKey(key: string): Promise<Project | undefined> {

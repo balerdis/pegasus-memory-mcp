@@ -77,6 +77,33 @@ export interface MemorySearchPort {
   searchMemory(input: MemorySearchInput): Promise<MemorySearchResult[]>;
 }
 
+export type MaintenanceMode = "dry_run" | "execute";
+export type MaintenanceStatus = "planned" | "deleted" | "noop" | "error";
+
+export interface MaintenanceSkippedTarget {
+  target: string;
+  reason: string;
+}
+
+export interface MaintenanceResult {
+  command: "reset" | "purge";
+  mode: MaintenanceMode;
+  targets: string[];
+  deleted: string[];
+  skipped: MaintenanceSkippedTarget[];
+  status: MaintenanceStatus;
+}
+
+export interface ProjectResetInput {
+  projectId: string;
+  databasePath: string;
+  mode: MaintenanceMode;
+}
+
+export interface ProjectMaintenancePort {
+  resetProjectData(input: ProjectResetInput): Promise<MaintenanceResult>;
+}
+
 export interface Clock {
   now(): Date;
 }

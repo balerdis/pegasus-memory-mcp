@@ -6,6 +6,7 @@ import {
   createSQLiteMemoryStore,
   defaultDatabasePath,
   openSQLiteDatabase,
+  resetProjectData,
   runMigrations,
   type SQLiteMemorySearchResult
 } from "../../src/adapters/sqlite/index.js";
@@ -188,5 +189,35 @@ describe("SQLite persistence and search", () => {
 
   it("creates the default database parent under the user data directory", () => {
     expect(defaultDatabasePath("/tmp/home")).toBe("/tmp/home/.local/share/pegasus-memory-mcp/memory.db");
+  });
+
+  it("resets one project with explicit FTS cleanup while preserving other projects", async () => {
+    const { dbPath } = await tempDb();
+    const store = createSQLiteMemoryStore({ databasePath: dbPath });
+    const writer = createMemoryWriter(store, store, new FixedClock(), new SequenceIds());
+    await store.saveProject({ id: "project-reset", key: "reset", lifecycle: { createdAt: now, updatedAt: now } });
+    await store.saveProject({ id: "project-keep", key: "keep", lifecycle: { createdAt: now, updatedAt: now } });
+    await store.saveChange({ id: "change-reset", projectId: "project-reset", key: "main", title: "Reset", lifecycle: { createdAt: now, updatedAt: now } });
+    await store.saveChange({ id: "change-keep", projectId: "project-keep", key: "main", title: "Keep", lifecycle: { createdAt: now, updatedAt: now } });
+    await writer.recordDecision({ projectId: "project-reset", changeId: "change-reset", title: "Delete me", content: "reset-only-token", scope: "project" });
+    await writer.recordDecision({ projectId: "project-keep", changeId: "change-keep", title: "Keep me", content: "keep-only-token", scope: "project" });
+    store.close();
+
+    const result = await resetProjectData({ projectId: "project-reset", databasePath: dbPath, mode: "execute" });
+
+    expect(result).toMatchObject({ command: "reset", mode: "execute", status: "deleted" });
+    expect(result.deleted).toEqual(expect.arrayContaining(["project:project-reset", "memory_fts:1"]));
+
+    const db = openSQLiteDatabase(dbPath);
+    try {
+      expect(db.prepare("SELECT count(*) FROM project WHERE id = ?").pluck().get("project-reset")).toBe(0);
+      expect(db.prepare("SELECT count(*) FROM memory_record WHERE project_id = ?").pluck().get("project-reset")).toBe(0);
+      expect(db.prepare("SELECT count(*) FROM memory_fts WHERE project_id = ?").pluck().get("project-reset")).toBe(0);
+      expect(db.prepare("SELECT count(*) FROM project WHERE id = ?").pluck().get("project-keep")).toBe(1);
+      expect(db.prepare("SELECT count(*) FROM memory_record WHERE project_id = ?").pluck().get("project-keep")).toBe(1);
+      expect(db.prepare("SELECT count(*) FROM memory_fts WHERE project_id = ?").pluck().get("project-keep")).toBe(1);
+    } finally {
+      db.close();
+    }
   });
 });
